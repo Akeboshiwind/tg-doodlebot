@@ -7,7 +7,8 @@
             [morse.api :as t]
             [morse.polling :as p]
             [doodlebot.utils :as u]
-            [doodlebot.api :as api])
+            [doodlebot.api :as api]
+            [doodlebot.config :as cfg])
   (:gen-class))
 
 (def ^:dynamic *token* "")
@@ -226,7 +227,10 @@
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (binding [*token* "158254207:AAFCJdxomPmcXvu0wI7QCCnncHtlhKi8pLY"]
-    (println "Starting server")
-    (p/start *token* doodle-bot)
-    @(promise)))
+  (cfg/load! "doodlebot.yml")
+  (if-let [token (cfg/config :token)]
+    (binding [*token* token]
+      (println "Starting server")
+      (p/start *token* doodle-bot)
+      @(promise))
+    (println "No token found")))
