@@ -1,17 +1,16 @@
 (ns doodlebot.core
   (:require [clojure.string :as str]
-            [clj-time.core :as ti]
-            [clj-time.coerce :as c]
+            [clj-time.core :as time]
             [clj-time.periodic :as pe]
-            [clj-time.format :as f]
+            [clj-time.format :as fo]
             [morse.handlers :as h]
             [morse.api :as t]
             [morse.polling :as p]
-            [doodlebot.utils :refer :all]
+            [doodlebot.utils :as u]
             [doodlebot.api :as api])
   (:gen-class))
 
-(def token "<CHANGE ME>")
+(def token "158254207:AAFCJdxomPmcXvu0wI7QCCnncHtlhKi8pLY")
 
 ;; Shape:
 (comment
@@ -52,25 +51,42 @@
   {:text text
    :callback_data callback-data})
 
+(defn settings-text
+  [{:keys [title name email start-date duration]}]
+  (str "Current settings:"
+       "\nTitle: " title
+       "\nName: " name
+       "\nEmail: " email
+       "\nStart Date (YYYY-MM-DD): " start-date
+       "\nDuration (days): " duration))
+
+(defn settings-keyboard
+  [show-create?]
+  (let [k {:inline_keyboard
+           [[{:text "Title" :callback_data "title"}
+             {:text "Your Name" :callback_data "name"}
+             {:text "Your Email" :callback_data "email"}]
+            [{:text "Start Date" :callback_data "start-date"}
+             {:text "Duration" :callback_data "duration"}]]}]
+    (if show-create?
+      (assoc-in k [:inline_keyboard 1 2]
+                {:text "Create Poll" :callback_data "create-poll"})
+      k)))
+
+(defn full-settings?
+  [settings]
+  (every? (complement nil?)
+          (map #(get settings %)
+               [:title :name :email :start-date :duration])))
+
 (defn settings-menu
   [chat-id settings]
   (t/send-text token chat-id
                {:reply_markup
-                {:inline_keyboard
-                 [[{:text "Title" :callback_data "title"}
-                   {:text "Your Name" :callback_data "name"}
-                   {:text "Your Email" :callback_data "email"}]
-                  [{:text "Start Date" :callback_data "start-date"}
-                   {:text "Duration" :callback_data "duration"}
-                   {:text "Create Poll" :callback_data "create-poll"}]]}}
-               (str "Current settings:"
-                    "\nTitle: " (:title settings)
-                    "\nName: " (:name settings)
-                    "\nEmail: " (:email settings)
-                    "\nStart Date (YYYY-MM-DD): " (:start-date settings)
-                    "\nDuration (days): " (:duration settings))))
+                (settings-keyboard (full-settings? settings))}
+               (settings-text settings)))
 
-(def ymd-fmt (f/formatters :year-month-day))
+(def ymd-fmt (fo/formatters :year-month-day))
 
 (defn start
   [{{id :id} :chat
@@ -84,9 +100,10 @@
                (let [settings (get-in db [from :settings])]
                  (assoc-in db
                            [from :settings]
-                           (deep-merge {:name (str fname " " lname)
-                                        :start-date (f/unparse ymd-fmt (ti/now))})))))
-      (settings-menu id settings))))
+                           (u/deep-merge {:name (str fname " " lname)
+                                          :start-date (fo/unparse ymd-fmt (time/now))})))))
+      (clojure.pprint/pprint
+       (settings-menu id settings)))))
 
 (defn help
   [{{id :id :as chat} :chat}]
@@ -117,7 +134,7 @@
                         :cache_time 0}
                        (map (fn [{:keys [id title]}]
                               {:type "article"
-                               :id (uuid)
+                               :id (u/uuid)
                                :title title
                                :input_message_content {:message_text (str "https://doodle.com/poll/" id)}})
                             polls)))))
@@ -139,12 +156,12 @@
       "create-poll" (let [{:keys [title name email start-date duration]}
                           (get-in @db [from :settings])
                           start-date
-                          (f/parse ymd-fmt start-date)
+                          (fo/parse ymd-fmt start-date)
                           {poll-id :id}
                           (api/make-poll {:title title
                                           :initiator {:name name
                                                       :email email}
-                                          :options (->> (pe/periodic-seq start-date (ti/days 1))
+                                          :options (->> (pe/periodic-seq start-date (time/days 1))
                                                         (map api/date->opt)
                                                         (take (Integer/parseInt duration)))})]
                       (swap! db (fn [db]
@@ -170,14 +187,16 @@
   (when msg
     (println "Message:" msg)
     (when-let [{:keys [current-selection]} (get @db from)]
-      (case current-selection
-        "title" (swap! db assoc-in [from :settings :title] text)
-        "name" (swap! db assoc-in [from :settings :name] text)
-        "email" (swap! db assoc-in [from :settings :email] text)
-        "start-date" (swap! db assoc-in [from :settings :start-date] text)
-        "duration" (swap! db assoc-in [from :settings :duration] text))
-      (swap! db assoc-in [from :current-selection] nil)
-      (settings-menu id (get-in @db [from :settings])))))
+      (when current-selection
+        (case current-selection
+          "title" (swap! db assoc-in [from :settings :title] text)
+          "name" (swap! db assoc-in [from :settings :name] text)
+          "email" (swap! db assoc-in [from :settings :email] text)
+          "start-date" (swap! db assoc-in [from :settings :start-date] text)
+          "duration" (swap! db assoc-in [from :settings :duration] text)
+          nil)
+        (swap! db assoc-in [from :current-selection] nil)
+        (settings-menu id (get-in @db [from :settings]))))))
 
 (h/defhandler doodle-bot
   ;; Standard commands
@@ -193,7 +212,6 @@
   (h/message-fn (fn [& args] (apply (var-get #'handle-message) args))))
 
 (def channel (p/start token doodle-bot))
-
 
 (defn -main
   "I don't do a whole lot ... yet."
