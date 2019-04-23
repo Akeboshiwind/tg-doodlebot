@@ -29,14 +29,19 @@
   (s/def ::id string?)
   (s/def ::poll (s/keys ::req-un [::id
                                   ::title]))
-  (s/def ::previous-polls (s/and vector?
-                                 (s/coll-of ::poll)))
+  (s/def ::previous-polls (s/coll-of ::poll))
 
   (s/def ::option #{:title :name :email :start-date :duration})
   (s/def ::current-selection (s/or :option ::option
                                    :nil nil?))
 
+  (s/def ::settings-message-id int?)
+
+  (s/def ::prompt-message-id int?)
+
   (s/def ::user-opts (s/keys ::req-un [::settings
+                                       ::settings-message-id
+                                       ::prompt-message-id
                                        ::previous-polls
                                        ::current-selection]))
 
@@ -93,17 +98,18 @@
     {from :id
      fname :first_name
      lname :last_name} :from}]
-  (let [opts (get @db from)]
-    (let [{:keys [settings previous-polls]} opts]
-      (swap! db
-             (fn [db]
-               (let [settings (get-in db [from :settings])]
-                 (assoc-in db
-                           [from :settings]
-                           (u/deep-merge {:name (str fname " " lname)
-                                          :start-date (fo/unparse ymd-fmt (time/now))})))))
-      (clojure.pprint/pprint
-       (settings-menu id settings)))))
+  (let [{:keys [settings]} (get @db from)
+        {{message-id :message_id} :result} (settings-menu id settings)]
+    (swap! db
+           (fn [db]
+             (let [settings (get-in db [from :settings])]
+               (-> db
+                   (assoc-in [from :settings]
+                             (u/deep-merge settings
+                                           {:name (str fname " " lname)
+                                            :start-date (fo/unparse ymd-fmt (time/now))}))
+                   (assoc-in [from :settings-message-id]
+                             message-id)))))))
 
 (defn help
   [{{id :id :as chat} :chat}]
