@@ -42,7 +42,7 @@
   (s/def ::user-opts (s/keys ::req-un [::settings
                                        ::settings-message-id
                                        ::prompt-message-id
-                                       ::previous-polls
+                                       ::poll
                                        ::current-selection]))
 
   (s/def ::db (s/map-of ::from-id ::user-opts))
@@ -124,14 +124,6 @@
   (println "Help was requested in " chat)
   (t/send-text token id "Help is on the way"))
 
-(defn make-poll
-  [{{id :id :as chat} :chat
-    text :text}]
-  (let [text (rest (str/split text #" "))]
-    (when-not (empty? text)
-      (println "Given text is:" text)
-      (t/send-text token id "Make one here: https://doodle.cam/"))))
-
 (defn make-poll-inline
   [{{id :id :as chat} :chat
     {from :id} :from
@@ -140,18 +132,18 @@
     :as inline}]
   (when inline
     (println "Inline:" inline)
-    (let [polls (get-in @db [from :previous-polls])]
-      (println polls)
+    (let [poll (get-in @db [from :poll])]
+      (println poll)
       (t/answer-inline token query-id
                        {:switch_pm_text "Create New poll"
                         :switch_pm_parameter "test"
                         :cache_time 0}
-                       (map (fn [{:keys [id title]}]
-                              {:type "article"
-                               :id (u/uuid)
-                               :title title
-                               :input_message_content {:message_text (str "https://doodle.com/poll/" id)}})
-                            polls)))))
+                       (when poll
+                         [(let [{:keys [id title]} poll]
+                            {:type "article"
+                             :id id
+                             :title (str "Latest Poll: " title)
+                             :input_message_content {:message_text (str "https://doodle.com/poll/" id)}})])))))
 
 (defn make-poll-callback
   [{{{id :id :as chat} :chat} :message
@@ -180,10 +172,9 @@
                                                               (map api/date->opt)
                                                               (take (Integer/parseInt duration)))})]
                             (swap! db (fn [db]
-                                        (let [polls (get-in db [from :previous-polls])]
-                                          (assoc-in db [from :previous-polls]
-                                                    (conj polls {:id poll-id
-                                                                 :title title})))))
+                                        (assoc-in db [from :poll]
+                                                  {:id poll-id
+                                                   :title title})))
                             (t/send-text token id
                                          {:reply_markup
                                           {:inline_keyboard
@@ -226,7 +217,6 @@
   (h/command-fn "help" help)
 
   ;; Bot functionality
-  (h/command-fn "poll" (fn [& args] (apply (var-get #'make-poll) args)))
   (h/inline-fn (fn [& args] (apply (var-get #'make-poll-inline) args)))
   (h/callback-fn (fn [& args] (apply (var-get #'make-poll-callback) args)))
 
