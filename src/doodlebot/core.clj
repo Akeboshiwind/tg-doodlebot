@@ -105,18 +105,19 @@
     {from :id
      fname :first_name
      lname :last_name} :from}]
+  (swap! db
+         (fn [db]
+           (let [settings (get-in db [from :settings])]
+             (assoc-in db [from :settings]
+                       (u/deep-merge (select-keys settings [:email :duration])
+                                     {:name (str fname " " lname)
+                                      :start-date (fo/unparse ymd-fmt (time/now))})))))
   (let [{:keys [settings]} (get @db from)
         {{message-id :message_id} :result} (settings-menu id settings)]
     (swap! db
            (fn [db]
-             (let [settings (get-in db [from :settings])]
-               (-> db
-                   (assoc-in [from :settings]
-                             (u/deep-merge settings
-                                           {:name (str fname " " lname)
-                                            :start-date (fo/unparse ymd-fmt (time/now))}))
-                   (assoc-in [from :settings-message-id]
-                             message-id)))))))
+             (assoc-in db [from :settings-message-id]
+                       message-id)))))
 
 (defn help
   [{{id :id :as chat} :chat}]
