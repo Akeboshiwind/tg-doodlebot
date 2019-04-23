@@ -10,7 +10,7 @@
             [doodlebot.api :as api])
   (:gen-class))
 
-(def token "158254207:AAFCJdxomPmcXvu0wI7QCCnncHtlhKi8pLY")
+(def ^:dynamic *token* "")
 
 ;; Shape:
 (comment
@@ -86,14 +86,14 @@
 
 (defn settings-menu
   [chat-id settings]
-  (t/send-text token chat-id
+  (t/send-text *token* chat-id
                {:reply_markup
                 (settings-keyboard (full-settings? settings))}
                (settings-text settings)))
 
 (defn update-settings-menu
   [chat-id message-id settings]
-  (t/edit-text token chat-id message-id
+  (t/edit-text *token* chat-id message-id
                {:reply_markup
                 (settings-keyboard (full-settings? settings))}
                (settings-text settings)))
@@ -122,7 +122,7 @@
 (defn help
   [{{id :id :as chat} :chat}]
   (println "Help was requested in " chat)
-  (t/send-text token id "Help is on the way"))
+  (t/send-text *token* id "Help is on the way"))
 
 (defn make-poll-inline
   [{{id :id :as chat} :chat
@@ -134,7 +134,7 @@
     (println "Inline:" inline)
     (let [poll (get-in @db [from :poll])]
       (println poll)
-      (t/answer-inline token query-id
+      (t/answer-inline *token* query-id
                        {:switch_pm_text "Create New poll"
                         :switch_pm_parameter "test"
                         :cache_time 0}
@@ -155,11 +155,11 @@
     (println "Callback:" callback)
     (let [{{message-id :message_id} :result}
           (case data
-            "title" (t/send-text token id "Set the title for your poll:")
-            "name" (t/send-text token id "Set your name for your poll:")
-            "email" (t/send-text token id "Set your email for your poll:")
-            "start-date" (t/send-text token id "Set the start date for your poll:")
-            "duration" (t/send-text token id "Set the duration for your poll:")
+            "title" (t/send-text *token* id "Set the title for your poll:")
+            "name" (t/send-text *token* id "Set your name for your poll:")
+            "email" (t/send-text *token* id "Set your email for your poll:")
+            "start-date" (t/send-text *token* id "Set the start date for your poll:")
+            "duration" (t/send-text *token* id "Set the duration for your poll:")
             "create-poll" (let [{:keys [title name email start-date duration]}
                                 (get-in @db [from :settings])
                                 start-date
@@ -175,7 +175,7 @@
                                         (assoc-in db [from :poll]
                                                   {:id poll-id
                                                    :title title})))
-                            (t/send-text token id
+                            (t/send-text *token* id
                                          {:reply_markup
                                           {:inline_keyboard
                                            [[{:text "Back to chat" :switch_inline_query ""}]]}}
@@ -186,7 +186,7 @@
                     (-> db
                         (assoc-in [from :current-selection] data)
                         (assoc-in [from :prompt-message-id] message-id)))))
-      (t/answer-callback token callback-id ""))))
+      (t/answer-callback *token* callback-id ""))))
 
 (defn handle-message
   [{{id :id} :chat
@@ -207,8 +207,8 @@
           nil)
         (swap! db assoc-in [from :current-selection] nil)
         (let [{:keys [settings settings-message-id prompt-message-id]} (get @db from)]
-          (t/delete-text token id prompt-message-id)
-          (t/delete-text token id message-id)
+          (t/delete-text *token* id prompt-message-id)
+          (t/delete-text *token* id message-id)
           (update-settings-menu id settings-message-id settings))))))
 
 (h/defhandler doodle-bot
@@ -223,13 +223,10 @@
   ;; Spying on everyone
   (h/message-fn (fn [& args] (apply (var-get #'handle-message) args))))
 
-(def channel (p/start token doodle-bot))
-
 (defn -main
   "I don't do a whole lot ... yet."
   [& args]
-  (println "Hello, World!"))
-
-(comment
-
-  [])
+  (binding [*token* "158254207:AAFCJdxomPmcXvu0wI7QCCnncHtlhKi8pLY"]
+    (println "Starting server")
+    (p/start *token* doodle-bot)
+    @(promise)))
