@@ -91,6 +91,13 @@
                 (settings-keyboard (full-settings? settings))}
                (settings-text settings)))
 
+(defn update-settings-menu
+  [chat-id message-id settings]
+  (t/edit-text token chat-id message-id
+               {:reply_markup
+                (settings-keyboard (full-settings? settings))}
+               (settings-text settings)))
+
 (def ymd-fmt (fo/formatters :year-month-day))
 
 (defn start
@@ -153,37 +160,41 @@
     :as callback}]
   (when callback
     (println "Callback:" callback)
-    (case data
-      "title" (t/send-text token id "Set the title for your poll:")
-      "name" (t/send-text token id "Set your name for your poll:")
-      "email" (t/send-text token id "Set your email for your poll:")
-      "start-date" (t/send-text token id "Set the start date for your poll:")
-      "duration" (t/send-text token id "Set the duration for your poll:")
-      "create-poll" (let [{:keys [title name email start-date duration]}
-                          (get-in @db [from :settings])
-                          start-date
-                          (fo/parse ymd-fmt start-date)
-                          {poll-id :id}
-                          (api/make-poll {:title title
-                                          :initiator {:name name
-                                                      :email email}
-                                          :options (->> (pe/periodic-seq start-date (time/days 1))
-                                                        (map api/date->opt)
-                                                        (take (Integer/parseInt duration)))})]
-                      (swap! db (fn [db]
-                                  (let [polls (get-in db [from :previous-polls])]
-                                    (assoc-in db [from :previous-polls]
-                                              (conj polls {:id poll-id
-                                                           :title title})))))
-                      (t/send-text token id
-                                   {:reply_markup
-                                    {:inline_keyboard
-                                     [[{:text "Back to chat" :switch_inline_query ""}]]}}
-                                   "Poll created:"))
-      nil)
-    (when-not (= "create-poll" data)
-      (swap! db assoc-in [from :current-selection] data))
-    (t/answer-callback token callback-id "")))
+    (let [{{message-id :message_id} :result}
+          (case data
+            "title" (t/send-text token id "Set the title for your poll:")
+            "name" (t/send-text token id "Set your name for your poll:")
+            "email" (t/send-text token id "Set your email for your poll:")
+            "start-date" (t/send-text token id "Set the start date for your poll:")
+            "duration" (t/send-text token id "Set the duration for your poll:")
+            "create-poll" (let [{:keys [title name email start-date duration]}
+                                (get-in @db [from :settings])
+                                start-date
+                                (fo/parse ymd-fmt start-date)
+                                {poll-id :id}
+                                (api/make-poll {:title title
+                                                :initiator {:name name
+                                                            :email email}
+                                                :options (->> (pe/periodic-seq start-date (time/days 1))
+                                                              (map api/date->opt)
+                                                              (take (Integer/parseInt duration)))})]
+                            (swap! db (fn [db]
+                                        (let [polls (get-in db [from :previous-polls])]
+                                          (assoc-in db [from :previous-polls]
+                                                    (conj polls {:id poll-id
+                                                                 :title title})))))
+                            (t/send-text token id
+                                         {:reply_markup
+                                          {:inline_keyboard
+                                           [[{:text "Back to chat" :switch_inline_query ""}]]}}
+                                         "Poll created:"))
+            nil)]
+      (when-not (= "create-poll" data)
+        (swap! db (fn [db]
+                    (-> db
+                        (assoc-in [from :current-selection] data)
+                        (assoc-in [from :prompt-message-id] message-id)))))
+      (t/answer-callback token callback-id ""))))
 
 (defn handle-message
   [{{id :id} :chat
@@ -192,7 +203,8 @@
     :as msg}]
   (when msg
     (println "Message:" msg)
-    (when-let [{:keys [current-selection]} (get @db from)]
+    (let [{:keys [current-selection]} (get @db from)
+          {message-id :message_id} msg]
       (when current-selection
         (case current-selection
           "title" (swap! db assoc-in [from :settings :title] text)
@@ -202,7 +214,10 @@
           "duration" (swap! db assoc-in [from :settings :duration] text)
           nil)
         (swap! db assoc-in [from :current-selection] nil)
-        (settings-menu id (get-in @db [from :settings]))))))
+        (let [{:keys [settings settings-message-id prompt-message-id]} (get @db from)]
+          (t/delete-text token id prompt-message-id)
+          (t/delete-text token id message-id)
+          (update-settings-menu id settings-message-id settings))))))
 
 (h/defhandler doodle-bot
   ;; Standard commands
